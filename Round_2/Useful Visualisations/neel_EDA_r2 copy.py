@@ -42,20 +42,17 @@ ash_trades = trades[trades['symbol'] == 'ASH_COATED_OSMIUM']
 
 
 def wall_mid_prices(price_df):
-    """
-    Compute wall mid price from the order book.
+    bid_df = price_df[['bid_volume_1', 'bid_volume_2', 'bid_volume_3', 'bid_price_1', 'bid_price_2', 'bid_price_3']].fillna(0)
+    ask_df = price_df[['ask_volume_1', 'ask_volume_2', 'ask_volume_3', 'ask_price_1', 'ask_price_2', 'ask_price_3']].fillna(0)
+    weighted_bids = (bid_df['bid_volume_1'] * bid_df['bid_price_1']) + (bid_df['bid_volume_2'] * bid_df['bid_price_2']) + (bid_df['bid_volume_3'] * bid_df['bid_price_3'])
+    total_bid_vol = bid_df['bid_volume_1'] + bid_df['bid_volume_3'] + bid_df['bid_volume_2']
+    bid_vwap = weighted_bids/total_bid_vol
+    weighted_asks = (ask_df['ask_volume_1'] * ask_df['ask_price_1']) + (ask_df['ask_volume_2'] * ask_df['ask_price_2']) + (ask_df['ask_volume_3'] * ask_df['ask_price_3'])
+    total_bid_asks = ask_df['ask_volume_1'] + ask_df['ask_volume_3'] + ask_df['ask_volume_2']
+    ask_vwap = weighted_asks/total_bid_asks
+    fv_vwap_est = (bid_vwap + ask_vwap)/2
+    price_df['vwap_estimate'] = fv_vwap_est
 
-    The wall bid/ask is the price level with the largest volume on each side.
-    Wall mid = (wall ask + wall bid) / 2, giving a more robust fair value
-    estimate than the naive mid price when best bid/ask is noisy.
-
-    Args:
-        price_df: Price dataframe with bid/ask price and volume columns for levels 1-3,
-                  plus global_ts and mid_price.
-
-    Returns:
-        DataFrame with columns [wall_mid_price, global_ts, mid_price].
-    """
     order_book_bids = price_df[['bid_price_1', 'bid_volume_1', 'bid_price_2', 'bid_volume_2',
                                 'bid_price_3', 'bid_volume_3']].dropna(how='all')
     order_book_asks = price_df[['ask_price_1', 'ask_volume_1',
@@ -67,11 +64,12 @@ def wall_mid_prices(price_df):
     order_book_asks['wall_ask_price'] = order_book_asks[['ask_volume_1', 'ask_volume_2', 'ask_volume_3']].idxmax(axis=1, skipna=True)
     order_book_asks['wall_ask_price'] = np.where(order_book_asks['wall_ask_price'] == 'ask_volume_1', order_book_asks['ask_price_1'],
                                                  np.where(order_book_asks['wall_ask_price'] == 'ask_volume_2', order_book_asks['ask_price_2'], order_book_asks['ask_price_3']))
-
     wall_mids = pd.merge(order_book_asks['wall_ask_price'], order_book_bids['wall_bid_price'], left_index=True, right_index=True)
     wall_mids['wall_mid_price'] = (wall_mids['wall_ask_price'] + wall_mids['wall_bid_price'])/2
-    wall_mids_final = pd.merge(wall_mids['wall_mid_price'], price_df[['global_ts', 'mid_price']], left_index=True, right_index=True)
-    return wall_mids_final
+
+    midinfo = price_df.join(wall_mids[['wall_mid_price']], how='left')
+
+    return midinfo
 
 
 def imbalances(price_df):
@@ -137,7 +135,7 @@ def overlay_trade_data(figure, trade_df, y_value, name=None):
     return figure
 
 
-def plot_spike_trajectories(price_df, window=20, threshold_multiplier=2.0, lookahead=20):
+def plot_spike_trajectories(price_df, window=20, threshold_multiplier=2.0, lookahead=200):
     """
     Plot normalised price trajectories following wall mid price spikes.
 
@@ -216,7 +214,7 @@ def plot_imbalance(price_df, trade_df):
     fig.add_trace(go.Scatter(x=price_df['global_ts'], y=price_df['imbalance_1'], line=dict(color='blue'), name='imbalance_1'))
     fig.add_trace(go.Scatter(x=price_df['global_ts'], y=price_df['imbalance_2'], line=dict(color='orange'), name='imbalance_2'))
     fig.add_trace(go.Scatter(x=price_df['global_ts'], y=price_df['imbalance_3'], line=dict(color='green'), name='imbalance_3'))
-    fig.add_trace(go.Scatter(x=trade_df['global_ts'], y=trade_df['quantity'], mode='markers',
+    fig.add_trace(go.Scatter(x=trade_df['global_ts'], y=np.zeros(len(trade_df)), mode='markers',
                              marker=dict(color='rgba(200,0,0,0.7)', size=6), name='trade_qty'))
     fig.update_yaxes(title_text='imbalance / normalised quantity')
     return fig
@@ -236,6 +234,7 @@ def plot_mids(mid_df):
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=mid_df['global_ts'], y=mid_df['mid_price'], line=dict(color='blue'), name='mid_price'))
     fig.add_trace(go.Scatter(x=mid_df['global_ts'], y=mid_df['wall_mid_price'], line=dict(color='red'), name='wall_mid_price'))
+    fig.add_trace(go.Scatter(x=mid_df['global_ts'], y=mid_df['vwap_estimate'], line=dict(color='green'), name='vwap_estimate'))
     return fig
 
 
@@ -306,5 +305,5 @@ def plotting_wrapper(product_price, product_trades, resample, resample_freq):
     spikes.show()
 
 
-plotting_wrapper(root_price, root_trades, True, 100)
+plotting_wrapper(ash_price, ash_trades, True, 50)
 
