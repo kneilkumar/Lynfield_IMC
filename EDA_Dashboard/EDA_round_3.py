@@ -305,35 +305,46 @@ def implied_vol(market_price, S, K, T, r=0.0):
 # NEW: BUILD WIDE VOUCHER TABLE
 # ══════════════════════════════════════════════════════════════════════════════
 
-def build_voucher_wide(extract_df, voucher_prices_dict, T):
-    """
-    Join extract mid price with the mid price of every voucher on timestamp,
-    then compute per-strike: intrinsic value, time value, implied vol, BS delta.
+# Vectorised implied vol — wraps brentq but processes whole arrays at once
+_iv_vec = np.vectorize(implied_vol, otypes=[float])
+_delta_vec = np.vectorize(bs_delta, otypes=[float])
 
-    Args:
-        extract_df:          Filtered & cleaned price df for VELVETFRUIT_EXTRACT.
-        voucher_prices_dict: Dict mapping voucher name → its price df.
-        T:                   Time to expiry in units consistent with vol (e.g. fraction
-                             of a round — just use 1.0 for now and treat vol as relative).
 
-    Returns:
-        Wide DataFrame indexed by global_ts with columns:
-            S, mid_<VEV>, intrinsic_<VEV>, time_value_<VEV>, iv_<VEV>, delta_<VEV>
-    """
+def build_voucher_wide(extract_df, voucher_prices_dict, T, cache_path='ROUND_3/voucher_wide.csv'):
+    # Return cached version if it exists
+    try:
+        wide = pd.read_csv(cache_path)
+        print(f"Loaded wide df from cache: {wide.shape}")
+        return wide
+    except FileNotFoundError:
+        pass
+
     base = extract_df[['global_ts', 'mid_price']].rename(columns={'mid_price': 'S'})
+
     for name, K in zip(VOUCHER_NAMES, VOUCHER_STRIKES):
-        v = voucher_prices_dict[name][['global_ts', 'mid_price']].rename(columns={'mid_price': f'mid_{name}'})
-        base = pd.merge(base, v, on='global_ts', how='inner')
-        S_col   = base['S']
-        mid_col = base[f'mid_{name}']
-        base[f'intrinsic_{name}']  = np.maximum(S_col - K, 0)
-        base[f'time_value_{name}'] = mid_col - base[f'intrinsic_{name}']
-        base[f'iv_{name}']         = base.apply(
-            lambda row: implied_vol(row[f'mid_{name}'], row['S'], K, T), axis=1)
-        base[f'delta_{name}']      = base.apply(
-            lambda row: bs_delta(row['S'], K, T, row[f'iv_{name}'])
-                        if not np.isnan(row[f'iv_{name}']) else np.nan, axis=1)
+        print(f"Processing {name}...")
+        v = (voucher_prices_dict[name][['global_ts', 'mid_price']]
+             .rename(columns={'mid_price': f'mid_{name}'}))
+        base = pd.merge(base, v, on='global_ts', how='left')
+
+        S = base['S'].values
+        mid = base[f'mid_{name}'].values
+
+        base[f'intrinsic_{name}'] = np.maximum(S - K, 0)
+        base[f'time_value_{name}'] = mid - base[f'intrinsic_{name}'].values
+
+        ivs = _iv_vec(mid, S, K, T)
+        base[f'iv_{name}'] = ivs
+
+        valid = ~np.isnan(ivs)
+        deltas = np.full(len(base), np.nan)
+        deltas[valid] = _delta_vec(S[valid], K, T, ivs[valid])
+        base[f'delta_{name}'] = deltas
+
+    base.to_csv(cache_path, index=False)
+    print(f"Saved wide df to {cache_path}: {base.shape}")
     return base
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -512,7 +523,7 @@ def plot_iv_vs_realised_vol(wide_df, extract_df, window=20):
 # NEW: VOUCHER PLOTTING WRAPPER
 # ══════════════════════════════════════════════════════════════════════════════
 
-def voucher_plotting_wrapper(extract_df, voucher_prices_dict, T=1.0, rv_window=20):
+def voucher_plotting_wrapper(extract_df, voucher_prices_dict, T=1.0, rv_window=100):
     """
     Full EDA pipeline for the voucher surface.
 
@@ -523,7 +534,8 @@ def voucher_plotting_wrapper(extract_df, voucher_prices_dict, T=1.0, rv_window=2
                              actual round structure; only affects IV scale, not ordering).
         rv_window:           Window for realised vol computation.
     """
-    wide = build_voucher_wide(extract_df, voucher_prices_dict, T)
+    # wide = build_voucher_wide(extract_df, voucher_prices_dict, T)
+    wide = pd.read_csv('voucher_wide.csv')
 
     check_arbitrage_bounds(wide)
 
@@ -545,6 +557,6 @@ def voucher_plotting_wrapper(extract_df, voucher_prices_dict, T=1.0, rv_window=2
 # ══════════════════════════════════════════════════════════════════════════════
 
 # plotting_wrapper(extract_price, extract_trades, True, 50)
-plotting_wrapper(gel_price,     gel_trades,     True, 50)
+# plotting_wrapper(gel_price,     gel_trades,     True, 50)
 
-# voucher_plotting_wrapper(extract_price, voucher_prices, T=5.0)
+voucher_plotting_wrapper(extract_price, voucher_prices, T=5.0)
