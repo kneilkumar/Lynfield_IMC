@@ -5,14 +5,15 @@ from plotly import graph_objects as go
 from plotly.subplots import make_subplots
 from scipy.stats import norm
 from scipy.optimize import brentq
+from matplotlib import pyplot as plt
 
 # ── Load & merge ──────────────────────────────────────────────────────────────
-prices_1 = pd.read_csv('ROUND_3/prices_round_3_day_0.csv', delimiter=';')
-prices_2 = pd.read_csv('ROUND_3/prices_round_3_day_1.csv', delimiter=';')
-prices_3 = pd.read_csv('ROUND_3/prices_round_3_day_2.csv', delimiter=';')
-trades_1 = pd.read_csv('ROUND_3/trades_round_3_day_0.csv', delimiter=';')
-trades_2 = pd.read_csv('ROUND_3/trades_round_3_day_1.csv', delimiter=';')
-trades_3 = pd.read_csv('ROUND_3/trades_round_3_day_2.csv', delimiter=';')
+prices_1 = pd.read_csv('Round_3/Data/prices_round_3_day_0.csv', delimiter=';')
+prices_2 = pd.read_csv('Round_3/Data/prices_round_3_day_1.csv', delimiter=';')
+prices_3 = pd.read_csv('Round_3/Data/prices_round_3_day_2.csv', delimiter=';')
+trades_1 = pd.read_csv('Round_3/Data/trades_round_3_day_0.csv', delimiter=';')
+trades_2 = pd.read_csv('Round_3/Data/trades_round_3_day_1.csv', delimiter=';')
+trades_3 = pd.read_csv('Round_3/Data/trades_round_3_day_2.csv', delimiter=';')
 
 trades_1 = pd.merge(trades_1, prices_1['day'], left_index=True, right_index=True)
 trades_2 = pd.merge(trades_2, prices_2['day'], left_index=True, right_index=True)
@@ -50,6 +51,18 @@ gel_trades     = trades[trades['symbol'] == GEL]
 
 voucher_prices = {name: prices[prices['product'] == name] for name in VOUCHER_NAMES}
 voucher_trades = {name: trades[trades['symbol'] == name] for name in VOUCHER_NAMES}
+
+# from statsmodels.graphics.tsaplots import plot_acf
+# plot_acf(gel_price['mid_price'], lags=200)
+# plt.show()
+#
+# from numpy.fft import fft, fftfreq
+# signal = gel_price['mid_price'].values
+# freqs = fftfreq(len(signal))
+# power = np.abs(fft(signal))**2
+# dominant_freq = freqs[np.argmax(power[1:len(signal)//2]) + 1]
+# cycle_length = int(1 / dominant_freq)
+# print(f"Dominant cycle: {cycle_length} ticks")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -145,7 +158,7 @@ def overlay_trade_data(figure, trade_df, y_value, name=None):
     return figure
 
 
-def plot_spike_trajectories(price_df, window=20, threshold_multiplier=2.0, lookahead=200):
+def plot_spike_trajectories(price_df, window=20, threshold_multiplier=2.0, lookahead=400):
     price_df = price_df.reset_index(drop=True)
     rolling_mean = price_df['wall_mid_price'].rolling(window).mean()
     rolling_std  = price_df['wall_mid_price'].rolling(window).std()
@@ -557,6 +570,6 @@ def voucher_plotting_wrapper(extract_df, voucher_prices_dict, T=1.0, rv_window=1
 # ══════════════════════════════════════════════════════════════════════════════
 
 # plotting_wrapper(extract_price, extract_trades, True, 50)
-# plotting_wrapper(gel_price,     gel_trades,     True, 50)
+plotting_wrapper(gel_price,     gel_trades,     True, 1)
 
-voucher_plotting_wrapper(extract_price, voucher_prices, T=5.0)
+# voucher_plotting_wrapper(extract_price, voucher_prices, T=5.0)
