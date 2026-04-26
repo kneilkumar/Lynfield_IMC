@@ -8,12 +8,12 @@ from scipy.optimize import brentq
 from matplotlib import pyplot as plt
 
 # ── Load & merge ──────────────────────────────────────────────────────────────
-prices_1 = pd.read_csv('Round_3/Data/prices_round_3_day_0.csv', delimiter=';')
-prices_2 = pd.read_csv('Round_3/Data/prices_round_3_day_1.csv', delimiter=';')
-prices_3 = pd.read_csv('Round_3/Data/prices_round_3_day_2.csv', delimiter=';')
-trades_1 = pd.read_csv('Round_3/Data/trades_round_3_day_0.csv', delimiter=';')
-trades_2 = pd.read_csv('Round_3/Data/trades_round_3_day_1.csv', delimiter=';')
-trades_3 = pd.read_csv('Round_3/Data/trades_round_3_day_2.csv', delimiter=';')
+prices_1 = pd.read_csv('Data/prices_round_3_day_0.csv', delimiter=';')
+prices_2 = pd.read_csv('Data/prices_round_3_day_1.csv', delimiter=';')
+prices_3 = pd.read_csv('Data/prices_round_3_day_2.csv', delimiter=';')
+trades_1 = pd.read_csv('Data/trades_round_3_day_0.csv', delimiter=';')
+trades_2 = pd.read_csv('Data/trades_round_3_day_1.csv', delimiter=';')
+trades_3 = pd.read_csv('Data/trades_round_3_day_2.csv', delimiter=';')
 
 trades_1 = pd.merge(trades_1, prices_1['day'], left_index=True, right_index=True)
 trades_2 = pd.merge(trades_2, prices_2['day'], left_index=True, right_index=True)
