@@ -272,6 +272,16 @@ def cli(
             case_sensitive=False,
         ),
     ] = "unknown",
+    counterparty_info: Annotated[
+        bool,
+        Option(
+            "--counterparty-info/--no-counterparty-info",
+            help=(
+                "Expose market trade buyer/seller IDs to Trader.run via state.market_trades. "
+                "Disable to mimic pre-round-4 behavior."
+            ),
+        ),
+    ] = True,
     version: Annotated[bool, Option("--version", "-v", help="Show the program's version number and exit.", is_eager=True, callback=version_callback)] = False,
 ) -> None:  # fmt: skip
     if out is not None and no_out:
@@ -322,7 +332,7 @@ def cli(
             day_num,
             print_output,
             match_trades,
-            True,
+            not counterparty_info,
             show_progress_bars,
             limits_override,
         )

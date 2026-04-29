@@ -1,217 +1,253 @@
-# Add code and refer to readme for instructions on how to run backtester.
-
-from datamodel import OrderDepth, TradingState, Order
-from typing import Dict, List, Tuple, Optional
 import json
-import math
-from collections import deque
+from typing import Any, Optional
 
-# ─── Position limits ───────────────────────────────────────
+from datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState
 
-POSITION_LIMITS: Dict[str, int] = {
-    "HYDROGEL_PACK": 200,
-    "VELVETFRUIT_EXTRACT": 200,
-    **{f"VEV_{k}": 300 for k in [4000, 4500, 5000, 5100, 5200, 5300, 5400, 5500, 6000, 6500]},
-}
 
-# ─── Parameters ────────────────────────────────────────────
+class Logger:
+    def __init__(self) -> None:
+        self.logs = ""
+        self.max_log_length = 3750
 
-VEV_EMA_ALPHA = 0.02
-VEV_PRIMARY_QTY = 30
-VEV_SECONDARY_QTY = 15
-VEV_EMA_THRESH = 12.0
-VEV_MM_SPREAD = 3
-VEV_MM_QTY = 2
-VEV_NEUTRAL_THRESH = 8.0
-VEV_MAX_POS = 200
+    def print(self, *objects: Any, sep: str = " ", end: str = "\n") -> None:
+        self.logs += sep.join(map(str, objects)) + end
 
-V4K_QTY = 15
-V4K_MAX_POS = 100
+    def flush(self, state: TradingState, orders: dict[Symbol, list[Order]], conversions: int, trader_data: str) -> None:
+        base_length = len(
+            self.to_json(
+                [
+                    self.compress_state(state, ""),
+                    self.compress_orders(orders),
+                    conversions,
+                    "",
+                    "",
+                ]
+            )
+        )
 
-HP_EMA_ALPHA = 0.001
-HP_HALF_SPREAD = 6
-HP_QTY = 2
+        max_item_length = (self.max_log_length - base_length) // 3
 
-# ─── Helpers ───────────────────────────────────────────────
+        print(
+            self.to_json(
+                [
+                    self.compress_state(state, self.truncate(state.traderData, max_item_length)),
+                    self.compress_orders(orders),
+                    conversions,
+                    self.truncate(trader_data, max_item_length),
+                    self.truncate(self.logs, max_item_length),
+                ]
+            )
+        )
 
-def _best_bid(depth: OrderDepth) -> Optional[float]:
-    return max(depth.buy_orders) if depth.buy_orders else None
+        self.logs = ""
 
-def _best_ask(depth: OrderDepth) -> Optional[float]:
-    return min(depth.sell_orders) if depth.sell_orders else None
+    def compress_state(self, state: TradingState, trader_data: str) -> list[Any]:
+        return [
+            state.timestamp,
+            trader_data,
+            self.compress_listings(state.listings),
+            self.compress_order_depths(state.order_depths),
+            self.compress_trades(state.own_trades),
+            self.compress_trades(state.market_trades),
+            state.position,
+            self.compress_observations(state.observations),
+        ]
 
-def _mid(depth: OrderDepth) -> Optional[float]:
-    b = _best_bid(depth); a = _best_ask(depth)
-    return (b + a) / 2.0 if b and a else None
+    def compress_listings(self, listings: dict[Symbol, Listing]) -> list[list[Any]]:
+        compressed = []
+        for listing in listings.values():
+            compressed.append([listing.symbol, listing.product, listing.denomination])
+        return compressed
 
-def norm_cdf(x):
-    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+    def compress_order_depths(self, order_depths: dict[Symbol, OrderDepth]) -> dict[Symbol, list[Any]]:
+        compressed = {}
+        for symbol, order_depth in order_depths.items():
+            compressed[symbol] = [order_depth.buy_orders, order_depth.sell_orders]
+        return compressed
 
-def bs_call(S, K, T, sigma):
-    if sigma <= 0 or T <= 0:
-        return max(S - K, 0)
-    d1 = (math.log(S / K) + 0.5 * sigma**2 * T) / (sigma * math.sqrt(T))
-    d2 = d1 - sigma * math.sqrt(T)
-    return S * norm_cdf(d1) - K * norm_cdf(d2)
+    def compress_trades(self, trades: dict[Symbol, list[Trade]]) -> list[list[Any]]:
+        compressed = []
+        for arr in trades.values():
+            for trade in arr:
+                compressed.append(
+                    [trade.symbol, trade.price, trade.quantity, trade.buyer, trade.seller, trade.timestamp]
+                )
+        return compressed
 
-# ─── Trader ────────────────────────────────────────────────
+    def compress_observations(self, observations: Observation) -> list[Any]:
+        conversion_observations = {}
+        for product, observation in observations.conversionObservations.items():
+            conversion_observations[product] = [
+                observation.bidPrice,
+                observation.askPrice,
+                observation.transportFees,
+                observation.exportTariff,
+                observation.importTariff,
+                observation.sugarPrice,
+                observation.sunlightIndex,
+            ]
+        return [observations.plainValueObservations, conversion_observations]
+
+    def compress_orders(self, orders: dict[Symbol, list[Order]]) -> list[list[Any]]:
+        compressed = []
+        for arr in orders.values():
+            for order in arr:
+                compressed.append([order.symbol, order.price, order.quantity])
+        return compressed
+
+    def to_json(self, value: Any) -> str:
+        return json.dumps(value, cls=ProsperityEncoder, separators=(",", ":"))
+
+    def truncate(self, value: str, max_length: int) -> str:
+        lo, hi = 0, min(len(value), max_length)
+        out = ""
+
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            candidate = value[:mid]
+            if len(candidate) < len(value):
+                candidate += "..."
+            encoded_candidate = json.dumps(candidate)
+            if len(encoded_candidate) <= max_length:
+                out = candidate
+                lo = mid + 1
+            else:
+                hi = mid - 1
+
+        return out
+
+
+logger = Logger()
+
 
 class Trader:
+    POSITION_LIMIT = 10
 
-    def run(self, state: TradingState) -> Tuple[Dict[str, List[Order]], int, str]:
+    def _best_bid_ask(self, order_depth: OrderDepth) -> tuple[Optional[int], Optional[int]]:
+        best_bid = max(order_depth.buy_orders) if order_depth.buy_orders else None
+        best_ask = min(order_depth.sell_orders) if order_depth.sell_orders else None
+        return best_bid, best_ask
 
-        try:
-            td = json.loads(state.traderData) if state.traderData else {}
-        except:
-            td = {}
+    def _mid_price(self, order_depth: OrderDepth) -> Optional[float]:
+        best_bid, best_ask = self._best_bid_ask(order_depth)
+        if best_bid is None and best_ask is None:
+            return None
+        if best_bid is None:
+            return float(best_ask)
+        if best_ask is None:
+            return float(best_bid)
+        return (best_bid + best_ask) / 2.0
 
-        ema_vev = td.get("ema_vev", 5250.0)
-        ema_hp = td.get("ema_hp", 9990.0)
-        day_min = td.get("day_min", 1e9)
-        day_max = td.get("day_max", -1e9)
-        current_day = td.get("day", -1)
+    def _allowable_buy(self, product: Symbol, position: int) -> int:
+        return max(0, self.POSITION_LIMIT - position)
 
-        returns_buffer = deque(td.get("returns_buffer", []), maxlen=200)
-        last_price = td.get("last_price", None)
+    def _allowable_sell(self, product: Symbol, position: int) -> int:
+        return max(0, self.POSITION_LIMIT + position)
 
-        result = {}
+    def _place_taking_orders(
+        self,
+        product: Symbol,
+        order_depth: OrderDepth,
+        fair_value: float,
+        position: int,
+        edge: float,
+    ) -> tuple[list[Order], int]:
+        orders: list[Order] = []
 
-        # Day reset
-        this_day = state.timestamp // 1_000_000
-        if this_day != current_day:
-            day_min = 1e9
-            day_max = -1e9
-            current_day = this_day
+        buy_remaining = self._allowable_buy(product, position)
+        for ask_price in sorted(order_depth.sell_orders):
+            if ask_price > fair_value - edge or buy_remaining <= 0:
+                break
+            available = -order_depth.sell_orders[ask_price]
+            qty = min(available, buy_remaining)
+            if qty > 0:
+                orders.append(Order(product, ask_price, qty))
+                position += qty
+                buy_remaining -= qty
 
-        vev_depth = state.order_depths.get("VELVETFRUIT_EXTRACT")
-        hp_depth = state.order_depths.get("HYDROGEL_PACK")
+        sell_remaining = self._allowable_sell(product, position)
+        for bid_price in sorted(order_depth.buy_orders, reverse=True):
+            if bid_price < fair_value + edge or sell_remaining <= 0:
+                break
+            available = order_depth.buy_orders[bid_price]
+            qty = min(available, sell_remaining)
+            if qty > 0:
+                orders.append(Order(product, bid_price, -qty))
+                position -= qty
+                sell_remaining -= qty
 
-        vev_mid = _mid(vev_depth) if vev_depth else None
-        hp_mid = _mid(hp_depth) if hp_depth else None
+        return orders, position
 
-        if vev_mid:
-            ema_vev = VEV_EMA_ALPHA * vev_mid + (1 - VEV_EMA_ALPHA) * ema_vev
+    def _place_making_orders(
+        self, product: Symbol, order_depth: OrderDepth, fair_value: float, position: int, width: int, clip: int
+    ) -> list[Order]:
+        orders: list[Order] = []
+        best_bid, best_ask = self._best_bid_ask(order_depth)
+        if best_bid is None or best_ask is None:
+            return orders
 
-        if hp_mid:
-            ema_hp = HP_EMA_ALPHA * hp_mid + (1 - HP_EMA_ALPHA) * ema_hp
+        buy_capacity = self._allowable_buy(product, position)
+        sell_capacity = self._allowable_sell(product, position)
+        if buy_capacity <= 0 and sell_capacity <= 0:
+            return orders
 
-        # ─── Rolling volatility ──────────────────────────────
+        inv_skew = position / self.POSITION_LIMIT
+        buy_quote = min(best_bid + 1, int(fair_value - width - inv_skew))
+        sell_quote = max(best_ask - 1, int(fair_value + width - inv_skew))
+        if buy_quote >= sell_quote:
+            buy_quote, sell_quote = best_bid, best_ask
 
-        if vev_mid and last_price:
-            ret = math.log(vev_mid / last_price)
-            returns_buffer.append(ret)
-        else:
-            returns_buffer.append(0)
+        buy_size = min(buy_capacity, clip)
+        sell_size = min(sell_capacity, clip)
+        if buy_size > 0:
+            orders.append(Order(product, buy_quote, buy_size))
+        if sell_size > 0:
+            orders.append(Order(product, sell_quote, -sell_size))
+        return orders
 
-        last_price = vev_mid
+    def run(self, state: TradingState):
+        persisted: dict[str, float] = {}
+        if state.traderData:
+            try:
+                loaded = json.loads(state.traderData)
+                if isinstance(loaded, dict):
+                    persisted = loaded
+            except Exception:
+                persisted = {}
 
-        if len(returns_buffer) > 20:
-            mean = sum(returns_buffer) / len(returns_buffer)
-            var = sum((r - mean) ** 2 for r in returns_buffer) / len(returns_buffer)
-            sigma = math.sqrt(var)
-        else:
-            sigma = 0.001
+        result: dict[Symbol, list[Order]] = {}
+        next_state: dict[str, float] = {}
+        debug_rows: list[str] = []
 
-        T = 5 / 365
-
-        # ─── VEV STRATEGY ────────────────────────────────────
-
-        vev_pos = state.position.get("VELVETFRUIT_EXTRACT", 0)
-        vev_orders = []
-
-        if vev_mid:
-            old_min, old_max = day_min, day_max
-            day_min = min(day_min, vev_mid)
-            day_max = max(day_max, vev_mid)
-
-            new_low = vev_mid < old_min
-            new_high = vev_mid > old_max
-            dev = vev_mid - ema_vev
-
-            bid = _best_bid(vev_depth)
-            ask = _best_ask(vev_depth)
-
-            if new_low and vev_pos < VEV_MAX_POS:
-                vev_orders.append(Order("VELVETFRUIT_EXTRACT", ask, VEV_PRIMARY_QTY))
-
-            elif new_high and vev_pos > -VEV_MAX_POS:
-                vev_orders.append(Order("VELVETFRUIT_EXTRACT", bid, -VEV_PRIMARY_QTY))
-
-            elif dev > VEV_EMA_THRESH:
-                vev_orders.append(Order("VELVETFRUIT_EXTRACT", bid, -VEV_SECONDARY_QTY))
-
-            elif dev < -VEV_EMA_THRESH:
-                vev_orders.append(Order("VELVETFRUIT_EXTRACT", ask, VEV_SECONDARY_QTY))
-
-        if vev_orders:
-            result["VELVETFRUIT_EXTRACT"] = vev_orders
-
-        # ─── HYDROGEL ────────────────────────────────────────
-
-        hp_orders = []
-        hp_pos = state.position.get("HYDROGEL_PACK", 0)
-
-        if hp_mid:
-            bid = _best_bid(hp_depth)
-            ask = _best_ask(hp_depth)
-
-            fv = round(ema_hp)
-            our_bid = fv - HP_HALF_SPREAD
-            our_ask = fv + HP_HALF_SPREAD
-
-            if ask and hp_pos < 200:
-                hp_orders.append(Order("HYDROGEL_PACK", our_bid, HP_QTY))
-
-            if bid and hp_pos > -200:
-                hp_orders.append(Order("HYDROGEL_PACK", our_ask, -HP_QTY))
-
-        if hp_orders:
-            result["HYDROGEL_PACK"] = hp_orders
-
-        # ─── IV SCALPING ─────────────────────────────────────
-
-        for strike in [5000, 5100, 5200]:
-
-            product = f"VEV_{strike}"
-            depth = state.order_depths.get(product)
-
-            if not depth or not vev_mid:
+        for product, depth in state.order_depths.items():
+            mid = self._mid_price(depth)
+            if mid is None:
                 continue
 
-            bid = _best_bid(depth)
-            ask = _best_ask(depth)
+            key = f"ewma:{product}"
+            previous_fair = persisted.get(key, mid)
+            fair = 0.85 * previous_fair + 0.15 * mid
+            next_state[key] = fair
 
-            if not bid or not ask:
-                continue
+            position = state.position.get(product, 0)
+            take_orders, position_after_take = self._place_taking_orders(
+                product, depth, fair, position, edge=1.0
+            )
+            make_orders = self._place_making_orders(
+                product, depth, fair, position_after_take, width=2, clip=3
+            )
 
-            mid = (bid + ask) / 2
-            fair = bs_call(vev_mid, strike, T, sigma)
+            product_orders = take_orders + make_orders
+            if product_orders:
+                result[product] = product_orders
 
-            edge = mid - fair
-            pos = state.position.get(product, 0)
-            limit = POSITION_LIMITS[product]
+            debug_rows.append(f"{product}:mid={mid:.1f},fair={fair:.1f},pos={position}")
 
-            orders = []
+        # Avoid breaching log limits with many products in round 5.
+        logger.print(" | ".join(debug_rows[:8]))
 
-            if edge > 1.5 and pos > -limit:
-                orders.append(Order(product, bid, -10))
+        trader_data = json.dumps(next_state, separators=(",", ":"))
+        conversions = 0
 
-            elif edge < -1.5 and pos < limit:
-                orders.append(Order(product, ask, 10))
-
-            if orders:
-                result[product] = orders
-
-        # ─── Save state ──────────────────────────────────────
-
-        trader_data = json.dumps({
-            "ema_vev": ema_vev,
-            "ema_hp": ema_hp,
-            "day_min": day_min,
-            "day_max": day_max,
-            "day": current_day,
-            "returns_buffer": list(returns_buffer),
-            "last_price": last_price
-        })
-
-        return result, 0, trader_data
+        logger.flush(state, result, conversions, trader_data)
+        return result, conversions, trader_data

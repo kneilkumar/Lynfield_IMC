@@ -8,22 +8,56 @@ from prosperity4bt.file_reader import FileReader
 DEFAULT_POSITION_LIMIT = 50
 
 LIMITS: dict[str, int] = {
-    "EMERALDS": 80,
-    "TOMATOES": 80,
-    "ASH_COATED_OSMIUM": 80,
-    "INTARIAN_PEPPER_ROOT": 80,
-    "HYDROGEL_PACK": 200,
-    "VELVETFRUIT_EXTRACT": 200,
-    "VEV_4000": 300,
-    "VEV_4500": 300,
-    "VEV_5000": 300,
-    "VEV_5100": 300,
-    "VEV_5200": 300,
-    "VEV_5300": 300,
-    "VEV_5400": 300,
-    "VEV_5500": 300,
-    "VEV_6000": 300,
-    "VEV_6500": 300,
+    "GALAXY_SOUNDS_DARK_MATTER": 10,
+    "GALAXY_SOUNDS_BLACK_HOLES": 10,
+    "GALAXY_SOUNDS_PLANETARY_RINGS": 10,
+    "GALAXY_SOUNDS_SOLAR_WINDS": 10,
+    "GALAXY_SOUNDS_SOLAR_FLAMES": 10,
+    "SLEEP_POD_SUEDE": 10,
+    "SLEEP_POD_LAMB_WOOL": 10,
+    "SLEEP_POD_POLYESTER": 10,
+    "SLEEP_POD_NYLON": 10,
+    "SLEEP_POD_COTTON": 10,
+    "MICROCHIP_CIRCLE": 10,
+    "MICROCHIP_OVAL": 10,
+    "MICROCHIP_SQUARE": 10,
+    "MICROCHIP_RECTANGLE": 10,
+    "MICROCHIP_TRIANGLE": 10,
+    "PEBBLES_XS": 10,
+    "PEBBLES_S": 10,
+    "PEBBLES_M": 10,
+    "PEBBLES_L": 10,
+    "PEBBLES_XL": 10,
+    "ROBOT_VACUUMING": 10,
+    "ROBOT_MOPPING": 10,
+    "ROBOT_DISHES": 10,
+    "ROBOT_LAUNDRY": 10,
+    "ROBOT_IRONING": 10,
+    "UV_VISOR_YELLOW": 10,
+    "UV_VISOR_AMBER": 10,
+    "UV_VISOR_ORANGE": 10,
+    "UV_VISOR_RED": 10,
+    "UV_VISOR_MAGENTA": 10,
+    "TRANSLATOR_SPACE_GRAY": 10,
+    "TRANSLATOR_ASTRO_BLACK": 10,
+    "TRANSLATOR_ECLIPSE_CHARCOAL": 10,
+    "TRANSLATOR_GRAPHITE_MIST": 10,
+    "TRANSLATOR_VOID_BLUE": 10,
+    "PANEL_1X2": 10,
+    "PANEL_2X2": 10,
+    "PANEL_1X4": 10,
+    "PANEL_2X4": 10,
+    "PANEL_4X4": 10,
+    "OXYGEN_SHAKE_MORNING_BREATH": 10,
+    "OXYGEN_SHAKE_EVENING_BREATH": 10,
+    "OXYGEN_SHAKE_MINT": 10,
+    "OXYGEN_SHAKE_CHOCOLATE": 10,
+    "OXYGEN_SHAKE_GARLIC": 10,
+    "SNACKPACK_CHOCOLATE": 10,
+    "SNACKPACK_VANILLA": 10,
+    "SNACKPACK_PISTACHIO": 10,
+    "SNACKPACK_STRAWBERRY": 10,
+    "SNACKPACK_RASPBERRY": 10,
 }
 
 
@@ -141,17 +175,33 @@ def read_day_data(file_reader: FileReader, round_num: int, day_num: int, no_name
     trades = []
     with file_reader.file([f"round{round_num}", f"trades_round_{round_num}_day_{day_num}.csv"]) as file:
         if file is not None:
-            for line in file.read_text(encoding="utf-8").splitlines()[1:]:
+            lines = file.read_text(encoding="utf-8").splitlines()
+            if len(lines) > 0:
+                header_columns = lines[0].split(";")
+                header_index = {name: idx for idx, name in enumerate(header_columns)}
+            else:
+                header_index = {}
+
+            timestamp_index = header_index.get("timestamp", 0)
+            buyer_index = header_index.get("buyer", 1)
+            seller_index = header_index.get("seller", 2)
+            symbol_index = header_index.get("symbol", 3)
+            price_index = header_index.get("price", 5)
+            quantity_index = header_index.get("quantity", 6)
+
+            for line in lines[1:]:
                 columns = line.split(";")
+                buyer = None if no_names else columns[buyer_index]
+                seller = None if no_names else columns[seller_index]
 
                 trades.append(
                     Trade(
-                        symbol=columns[3],
-                        price=int(float(columns[5])),
-                        quantity=int(columns[6]),
-                        buyer=columns[1],
-                        seller=columns[2],
-                        timestamp=int(columns[0]),
+                        symbol=columns[symbol_index],
+                        price=int(float(columns[price_index])),
+                        quantity=int(columns[quantity_index]),
+                        buyer=buyer,
+                        seller=seller,
+                        timestamp=int(columns[timestamp_index]),
                     )
                 )
 

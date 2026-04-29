@@ -55,6 +55,9 @@ $ prosperity4btest example/starter.py 1 --no-out
 # (accepted = subtract Trader.bid() once from round 2 PnL)
 $ prosperity4btest sample.py 2 --round2-access accepted
 
+# Round 4: disable counterparty IDs for market trades (legacy behavior)
+$ prosperity4btest sample.py 4 --no-counterparty-info
+
 # Backtest on custom data
 # Requires the value passed to `--data` to be a path to a directory that is similar in structure to https://github.com/nabayansaha/imc-prosperity-4-backtester/tree/master/prosperity4bt/resources
 $ prosperity4btest example/starter.py 1 --data prosperity4bt/resources
@@ -83,6 +86,15 @@ the backtester now reads this value and reports fee-aware round 2 summary number
   - `--round2-access unknown` (default): no deduction, informational only.
   - `--round2-access accepted`: subtract bid once from round 2 PnL.
   - `--round2-access rejected`: no deduction from round 2 PnL.
+
+## Round 4 Additions
+
+### Counterparty IDs in market trades
+
+For round 4, market trades include participant IDs in `Trade.buyer` and `Trade.seller`.
+
+- Default behavior: IDs are exposed to your strategy through `state.market_trades`.
+- Use `--no-counterparty-info` to hide IDs and mimic pre-round-4 behavior.
 
 ### Manual Challenge Calculator (`invest` command)
 
@@ -119,10 +131,12 @@ Limits are enforced before orders are matched to order depths. If for a product 
 
 ### Position limits
 
-Known Prosperity 4 products are defined in `prosperity4bt/data.py` (`LIMITS`).
+Known products and default limits are defined in `prosperity4bt/data.py` (`LIMITS`).
 
-- Round 0 products: `EMERALDS` = **80**, `TOMATOES` = **80**
-- Round 1 products: `ASH_COATED_OSMIUM` = **80**, `INTARIAN_PEPPER_ROOT` = **80**
+Round 5 defaults:
+- The 50 Round 5 products are listed in `LIMITS`
+- Each Round 5 product has a default position limit of **10**
+- In Round 5, products from previous rounds are not tradable in the official environment
 
 Any product not listed there uses a default of **50** until you add it to `LIMITS`.
 
